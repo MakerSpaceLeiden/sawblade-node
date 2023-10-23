@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "SAWBLADE")(type "KiCad")(uri "${KIPRJMOD}/SAWBLADE.kicad_sym")(options "")(descr ""))
+)
