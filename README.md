@@ -1,6 +1,6 @@
 # SawBladeCabinet-node
 
-Node **sawbladecabinet** is employed at MakerSpace Leiden to manage the two doors of the saw blade cabinet. This node is responsible for controlling the locks on the doors, providing access to various saw blades.
+This **saw blade cabinet node** is employed at MakerSpace Leiden to manage the two doors of the saw blade cabinet. This node is responsible for controlling the locks on the doors, providing access to various saw blades.
 
 ## Features
 - The saw blade cabinet comprises two doors, each granting access to different sets of saw blades.
