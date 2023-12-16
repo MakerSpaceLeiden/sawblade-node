@@ -3,6 +3,7 @@
 # prevent the real config files from accidentally
 # slipping into GIT.
 .passwd.h
+passwd.h
 acnode.ini
 keydb.txt
 *.priv

@@ -33,7 +33,7 @@
 #include "passwd.h"
 /* If using WiFi instead of a fixed ethernet connection, and/or OTA:
 
-Add Passwd.h to the sawblade-node/src directoy containing the following information
+Add Passwd.h to the sawbladecabinet-node/src directoy containing the following information
 
 #pragma once
 
