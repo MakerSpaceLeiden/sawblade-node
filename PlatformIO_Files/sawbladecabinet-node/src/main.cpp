@@ -61,7 +61,7 @@ Add Passwd.h to the sawbladecabinet-node/src directoy containing the following i
 #define CLEAR_EEPROM_AND_CACHE_BUTTON_PRESSED (LOW)
 #define MAX_WAIT_TIME_BUTTON_PRESSED          (4000)  // in ms
 
-#define DOOR_OPEN_TIME                          (1) // in s
+#define DOOR_OPEN_TIME                          (250) // in ms
 #define CHECK_NFC_READER_AVAILABLE_TIME_WINDOW  (10000) // in ms 
 #define GPIOPORT_I2C_RECOVER_TRANSISTOR         (15)
 
@@ -86,7 +86,7 @@ TelnetSerialStream telnetSerialStream = TelnetSerialStream();
 OTA ota = OTA(OTA_PASSWD);
 #endif
 
- LED aartLed = LED(SYSTEM_LED);    // defaults to the aartLed - otherwise specify a GPIO.
+LED aartLed = LED(SYSTEM_LED);    // defaults to the aartLed - otherwise specify a GPIO.
 
 typedef enum {
   BOOTING, OUTOFORDER,      // device not functional.
@@ -124,13 +124,16 @@ struct {
   { "Clear status",           LED::LED_PENDING,                      NEVER, WAITINGFORCARD, 0 },
   { "Approved card",          LED::LED_PENDING,                  60 * 1000, CLEARSTATUS,    0 },
   { "Rejected",               LED::LED_ERROR,                     5 * 1000, CLEARSTATUS,    0 },
-  { "Door lock is open",      LED::LED_ON,           DOOR_OPEN_TIME * 1000, LOCKCLOSED,     0 },
+  { "Door lock is open",      LED::LED_ON,                  DOOR_OPEN_TIME, LOCKCLOSED,     0 },
   { "Door lock is closed",    LED::LED_ON,                           NEVER, WAITINGFORCARD, 0 },
 };
 
 unsigned long laststatechange = 0, lastReport = 0;
 static machinestates_t laststate = OUTOFORDER;
 machinestates_t machinestate = BOOTING;
+
+const char * membertag;
+static bool pendingapprovaldoorlock2;
 
 // to handle onconnect only once (only after reboot)
 static bool firstOnConnectTime = true;
@@ -247,23 +250,26 @@ void setup() {
 
   });
 
-node.onApproval([](const char *machine) {
-    if ((machinestate == WAITINGFORCARD) || (machinestate == CHECKINGCARD)) {  
-      if (strcmp(machine, DOORLOCK1) == 0) {
-          Debug.print("Got approve for machine: ");
-          Debug.println(machine);    
-          digitalWrite(DOORLOCK1_RELAIS, 0); // Unlock the outer-door-lock
-      } else if (strcmp(machine, DOORLOCK2) == 0) {
-          Debug.print("Got approve for machine: ");
-          Debug.println(machine);       
-          digitalWrite(DOORLOCK1_RELAIS, 0); // Unlock the outer-door-lock
-          delay(3000); // Wait for 3 seconds        
-          digitalWrite(DOORLOCK2_RELAIS, 0); // Unlock the inner-door-lock
+  node.onApproval([](const char *machine) {
+      if ((machinestate == WAITINGFORCARD) || (machinestate == CHECKINGCARD)) {  
+        // approval for outer-door-lock 
+          if (strcmp(machine, DOORLOCK1) == 0) {
+              Debug.print("Got approve for machine: ");
+              Debug.println(machine);    
+              digitalWrite(DOORLOCK1_RELAIS, 0); // Unlock the outer-door-lock
+              pendingapprovaldoorlock2 = true;
+              machinestate = LOCKOPEN; // Update machine state as needed
+          } 
+          // approval for inner-door-lock    
+          else if (strcmp(machine, DOORLOCK2) == 0) {
+              Debug.print("Got approve for machine: ");
+              Debug.println(machine);       
+              digitalWrite(DOORLOCK2_RELAIS, 0); // Unlock the inner-door-lock
+              pendingapprovaldoorlock2 = false;
+              machinestate = LOCKOPEN; // Update machine state as needed
+          }
       }
-      machinestate = LOCKOPEN; // Update machine state as needed
-      Log.println("User is approved and the door is opened");
-    }
-});
+  });
   
   node.onDenied([](const char * machine) {
     Debug.println("Got denied");
@@ -271,20 +277,18 @@ node.onApproval([](const char *machine) {
       Debug.println("Denied ingnored, one of the doors is already open");
     } else {
       machinestate = REJECTED;
-
     }
   });
 
   node.set_report_period(20 * 1000);
   node.onReport([](JsonObject  & report) {
     report["state"] = state[machinestate].label;
-
-#ifdef OTA_PASSWD
-    report["ota"] = true;
-#else
-    report["ota"] = false;
-#endif
-  });
+    #ifdef OTA_PASSWD
+      report["ota"] = true;
+    #else
+      report["ota"] = false;
+    #endif
+    });
 
   reader.onSwipe([](const char * tag) -> ACBase::cmd_result_t {
     // avoid swithing messing with the door swipe process
@@ -298,10 +302,8 @@ node.onApproval([](const char *machine) {
     // an approval request, keep state, and so on.
     //
     Debug.printf("Detected a normal swipe.\n");
-
-    checkNFCReaderAvailable();
+    membertag = tag;
     machinestate = CHECKINGCARD;    
-
     return ACBase::CMD_DECLINE;
   });
 
@@ -311,28 +313,28 @@ node.onApproval([](const char *machine) {
   reader.set_debug(false);
   node.addHandler(&reader);
   
-#ifdef OTA_PASSWD
-  node.addHandler(&ota);
-#endif
+  #ifdef OTA_PASSWD
+    node.addHandler(&ota);
+  #endif
 
   Log.addPrintStream(std::make_shared<MqttLogStream>(mqttlogStream));
   auto t = std::make_shared<TelnetSerialStream>(telnetSerialStream);
   Log.addPrintStream(t);
   Debug.addPrintStream(t);
 
-//   node.set_debug(true);
-//   node.set_debugAlive(true);
+  //   node.set_debug(true);
+  //   node.set_debugAlive(true);
 
-// if Olimex ESP32-PoE board is used
-#ifdef ESP32_PoE  
-  node.begin(BOARD_OLIMEX);
-#endif
+  // if Olimex ESP32-PoE board is used
+  #ifdef ESP32_PoE  
+    node.begin(BOARD_OLIMEX);
+  #endif
 
-// if default, board (POESP, board Aart) is used
-#ifndef ESP32_PoE
-  node.begin();
-#endif
-  Log.println("Booted: " __FILE__ " " __DATE__ " " __TIME__ );
+  // if default, board (POESP, board Aart) is used
+  #ifndef ESP32_PoE
+    node.begin();
+  #endif
+    Log.println("Booted: " __FILE__ " " __DATE__ " " __TIME__ );
 }
 
 unsigned long now;
@@ -341,7 +343,7 @@ void loop() {
 
   node.loop();
 
-  if (USE_NFC_RFID_CARD) {
+  if ((USE_NFC_RFID_CARD) && (!pendingapprovaldoorlock2)) {
     now = millis();
     if ((now - lastCheckNFCReaderTime) > CHECK_NFC_READER_AVAILABLE_TIME_WINDOW) {
       lastCheckNFCReaderTime = now;
@@ -387,10 +389,7 @@ void loop() {
     case REBOOT: 
       node.delayedReboot();   
       break;
-
     case WAITINGFORCARD:
-
-
     case CHECKINGCARD:
        break;   
      case CLEARSTATUS:
@@ -403,11 +402,20 @@ void loop() {
       // keep the lock open
       break;
     case LOCKCLOSED:
-      checkNFCReaderAvailable();    
-      digitalWrite(DOORLOCK1_RELAIS, 1); // Lock the outer-door-lock
-      digitalWrite(DOORLOCK2_RELAIS, 1); // Lock the inner-door-lock
-      machinestate = WAITINGFORCARD;
-      break;
+      // If outer-door-lock is opened and  approval for inner-door-lock is pending; 
+      if (pendingapprovaldoorlock2 == true) {
+          digitalWrite(DOORLOCK1_RELAIS, 1); // Lock the outer-door-lock
+          digitalWrite(DOORLOCK2_RELAIS, 1); // Lock the inner-door-lock     
+          node.request_approval(membertag, "energize", DOORLOCK2); // request approval for inner-door-lock
+          membertag = "none"; // after using it, set the membertag value back to none
+          machinestate = CHECKINGCARD;
+          pendingapprovaldoorlock2 = false;
+          }
+      else {
+          digitalWrite(DOORLOCK1_RELAIS, 1); // Lock the outer-door-lock
+          digitalWrite(DOORLOCK2_RELAIS, 1); // Lock the inner-door-lock
+          machinestate = WAITINGFORCARD;
+          }
     case BOOTING:
     case OUTOFORDER:
     case TRANSIENTERROR:
